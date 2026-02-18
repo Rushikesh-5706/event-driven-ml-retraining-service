@@ -7,8 +7,29 @@ import time
 from pika.exceptions import AMQPConnectionError
 from .model_trainer import ModelTrainer
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Configure structured logging
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+            "funcName": record.funcName,
+        }
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_record)
+
+logging.basicConfig(level=logging.INFO)
+root_logger = logging.getLogger()
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter())
+root_logger.addHandler(handler)
+# Remove default handlers
+for h in root_logger.handlers[:-1]:
+    root_logger.removeHandler(h)
+
 logger = logging.getLogger(__name__)
 
 # Config
