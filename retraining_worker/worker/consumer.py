@@ -58,12 +58,13 @@ def get_connection():
             connection = pika.BlockingConnection(parameters)
             return connection
         except AMQPConnectionError as e:
-            logger.warning(f"Connection failed: {e}. Retrying in 5 seconds...")
+            sleep_time = min(5 * (2 ** retries), 60) # Exponential backoff capped at 60s
+            logger.warning(f"Connection failed: {e}. Retrying in {sleep_time} seconds (Attempt {retries + 1}/{max_retries})...")
             retries += 1
-            time.sleep(5)
+            time.sleep(sleep_time)
     
     logger.critical("Could not connect to RabbitMQ after maximum retries. Exiting.")
-    sys.exit(1)
+    raise ConnectionError("Could not connect to RabbitMQ after maximum retries.")
 
 def on_message(ch, method, properties, body):
     """Callback for processing messages."""
@@ -86,29 +87,23 @@ def on_message(ch, method, properties, body):
         result = trainer.train(model_id, dataset_version)
         
         if result:
-            logger.info(f"Task successfully processed. Acknowledging message.")
+            logger.info("Task successfully processed. Acknowledging message.")
             ch.basic_ack(delivery_tag=method.delivery_tag)
         else:
-            # Code shouldn't reach here if train raises, but for safety
-            logger.error("Training returned None. Nacking message.")
+            logger.error(f"Training returned falsy value ({result!r}). Nacking message.")
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
     except json.JSONDecodeError:
         logger.error(f"Failed to decode message body: {body}")
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
     except Exception as e:
-        logger.exception(f"Unexpected error processing message: {e}")
+        logger.exception(f"Error processing message: {e}")
         # Decide whether to requeue based on error type. 
         # For this task, strictly we nack(False) to avoid infinite loops if it's a code bug.
         # In a real system, we might requeue transient errors.
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-def main():
-    logger.info("Worker service starting...")
-    
-    connection = get_connection()
-    channel = connection.channel()
-    
+def start_consuming(channel):
     # Ensure queue exists and is durable
     channel.queue_declare(queue=QUEUE_NAME, durable=True)
     
@@ -125,8 +120,24 @@ def main():
         channel.stop_consuming()
     except Exception as e:
         logger.critical(f"Worker crashed: {e}")
+
+def main():
+    connection = None
+    try:
+        connection = get_connection()
+        channel = connection.channel()
+        start_consuming(channel)
+    except Exception as e:
+        logger.exception(f"Fatal error in consumer: {e}")
+        # Allow Docker to restart
+        sys.exit(1)
     finally:
-        connection.close()
+        if connection and not connection.is_closed:
+            try:
+                connection.close()
+                logger.info("RabbitMQ connection closed.")
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
 
 if __name__ == '__main__':
     main()

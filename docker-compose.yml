@@ -26,11 +26,12 @@ services:
   training_trigger_api:
     build: ./training_trigger_api
     container_name: training_trigger_api
+    restart: on-failure
     ports:
       - "5000:5000"
     environment:
       FLASK_APP: app.main
-      FLASK_ENV: development
+      FLASK_DEBUG: 1
       RABBITMQ_HOST: rabbitmq_host
       RABBITMQ_PORT: 5672
       RABBITMQ_USER: guest
@@ -41,7 +42,7 @@ services:
     volumes:
       - ./training_trigger_api:/app
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -51,6 +52,7 @@ services:
   retraining_worker:
     build: ./retraining_worker
     container_name: retraining_worker
+    restart: always
     environment:
       RABBITMQ_HOST: rabbitmq_host
       RABBITMQ_PORT: 5672

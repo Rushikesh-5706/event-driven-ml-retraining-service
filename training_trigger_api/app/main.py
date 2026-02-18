@@ -4,6 +4,8 @@ import logging
 import sys
 from .services.message_publisher import MessagePublisher
 
+import json
+
 # Configure structured logging
 class JsonFormatter(logging.Formatter):
     def format(self, record):
@@ -16,7 +18,7 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             log_record["exception"] = self.formatException(record.exc_info)
-        return str(log_record) # Ideally use json.dumps, but str representation is sufficient for this format demo
+        return json.dumps(log_record)
 
 logging.basicConfig(level=logging.INFO)
 root_logger = logging.getLogger()
@@ -45,7 +47,6 @@ def get_publisher():
     if publisher is None:
         try:
             publisher = MessagePublisher(RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS)
-            # Pre-connect to fail fast if possible or just initialize state
         except Exception as e:
             logger.error(f"Failed to initialize publisher: {e}")
     return publisher
@@ -69,10 +70,7 @@ def trigger_retraining():
     # Publish Event
     publisher_instance = get_publisher()
     if not publisher_instance:
-         # Attempt to re-init
-         publisher_instance = get_publisher()
-         if not publisher_instance:
-            return jsonify({"error": "Service Unavailable", "details": "Messaging service is down"}), 503
+         return jsonify({"error": "Service Unavailable", "details": "Messaging service is down"}), 503
 
     success = publisher_instance.publish({
         "model_id": model_id,

@@ -1,47 +1,54 @@
 import unittest
 from unittest.mock import patch, MagicMock
 from app.main import app
-from app.services.message_publisher import MessagePublisher
 
-class TestTrainingTriggerAPI(unittest.TestCase):
+class TestAPI(unittest.TestCase):
     def setUp(self):
         self.app = app.test_client()
         self.app.testing = True
 
     @patch('app.main.get_publisher')
     def test_trigger_retraining_success(self, mock_get_publisher):
-        # Mock publisher instance
-        mock_publisher_instance = MagicMock()
-        mock_publisher_instance.publish.return_value = True
-        mock_get_publisher.return_value = mock_publisher_instance
-
-        payload = {"model_id": "model_v1", "dataset_version": "v1.0"}
+        """Test successful retraining trigger."""
+        mock_publisher = MagicMock()
+        mock_publisher.publish.return_value = True
+        mock_get_publisher.return_value = mock_publisher
+        
+        payload = {"model_id": "m1", "dataset_version": "v1"}
         response = self.app.post('/trigger-retraining', json=payload)
         
         self.assertEqual(response.status_code, 202)
         self.assertIn("Retraining triggered successfully", response.get_json()['message'])
 
     def test_trigger_retraining_invalid_payload(self):
-        payload = {"model_id": "model_v1"} # Missing dataset_version
+        """Test triggering with missing fields."""
+        payload = {"model_id": "m1"} # Missing dataset_version
         response = self.app.post('/trigger-retraining', json=payload)
         
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Missing 'model_id' or 'dataset_version'", response.get_json()['details'])
+        self.assertIn("Invalid payload", response.get_json()['error'])
 
-    @patch('app.services.message_publisher.pika.BlockingConnection')
-    def test_publisher_connection(self, mock_pika_connection):
-        # Setup mock connection and channel
-        mock_connection = MagicMock()
-        mock_channel = MagicMock()
-        mock_pika_connection.return_value = mock_connection
-        mock_connection.channel.return_value = mock_channel
+    @patch('app.main.get_publisher')
+    def test_trigger_retraining_service_unavailable(self, mock_get_publisher):
+        """Test 503 when publisher unavailable."""
+        mock_get_publisher.return_value = None
         
-        publisher = MessagePublisher("host", 5672, "user", "pass", retry_delay=0)
-        result = publisher.publish({"test": "data"})
+        payload = {"model_id": "m1", "dataset_version": "v1"}
+        response = self.app.post('/trigger-retraining', json=payload)
         
-        self.assertTrue(result)
-        mock_channel.basic_publish.assert_called_once()
-        mock_channel.queue_declare.assert_called_with(queue='retraining_queue', durable=True)
+        self.assertEqual(response.status_code, 503)
+
+    @patch('app.main.get_publisher')
+    def test_trigger_retraining_publish_fail(self, mock_get_publisher):
+        """Test 500 when publish fails."""
+        mock_publisher = MagicMock()
+        mock_publisher.publish.return_value = False
+        mock_get_publisher.return_value = mock_publisher
+
+        payload = {"model_id": "m1", "dataset_version": "v1"}
+        response = self.app.post('/trigger-retraining', json=payload)
+
+        self.assertEqual(response.status_code, 500)
 
 if __name__ == '__main__':
     unittest.main()

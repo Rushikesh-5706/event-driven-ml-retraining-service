@@ -53,17 +53,15 @@ class MessagePublisher:
         raise ConnectionError(f"Failed to connect to RabbitMQ after {self.max_retries} attempts.")
 
     def publish(self, message: dict) -> bool:
-        """Publish a message to the queue utilizing persistent delivery mode."""
+        """
+        Publishes a message to the RabbitMQ queue.
+        Returns True if successful, False otherwise.
+        """
         try:
             self._connect()
             
-            if self._connection is None or self._connection.is_closed:
-                # Attempt strictly one reconnect before failing
-                logger.warning("Connection lost. Attempting to reconnect before publishing.")
-                self._connect()
-
             properties = pika.BasicProperties(
-                delivery_mode=2,  # make message persistent
+                delivery_mode=2,  # Make message persistent
                 content_type='application/json'
             )
             
@@ -73,21 +71,22 @@ class MessagePublisher:
                 body=json.dumps(message),
                 properties=properties
             )
+            
             logger.info(f"Published message to {self.queue_name}: {message}")
             return True
-        
-        except (AMQPConnectionError, AMQPChannelError) as e:
-            logger.error(f"Failed to publish message due to AMQP error: {e}")
+            
+        except (pika.exceptions.AMQPError, IOError) as e:
+            logger.error(f"Failed to publish message: {e}")
             # Reset connection state to force full reconnect next time
             if self._connection:
                 try:
                     self._connection.close()
-                except:
-                    pass
+                except Exception:
+                    pass # Ignore errors during close if already in an error state
             self._connection = None
             return False
         except Exception as e:
-            logger.exception(f"Unexpected error publishing message: {e}")
+            logger.error(f"Unexpected error during publish: {e}")
             return False
 
     def close(self):

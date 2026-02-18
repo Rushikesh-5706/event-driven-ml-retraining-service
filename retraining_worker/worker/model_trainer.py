@@ -65,5 +65,5 @@ class ModelTrainer:
             }
 
         except Exception as e:
-            logger.error(f"Training failed for {model_id}: {e}")
-            raise
+            logger.exception(f"Simulated training failed for model_id: {model_id}, dataset_version: {dataset_version}. Error: {e}")
+            return False
