@@ -9,7 +9,7 @@ COPY worker/ ./worker
 
 # Expected to be mounted via docker-compose, but we copy for standalone build safety
 # In production, data might come from S3 or valid mount
-COPY data/ ./data 
+# Data is mounted via volume in docker-compose or generated at runtime if missing 
 
 # Unbuffered output for seeing logs in real-time
 ENV PYTHONUNBUFFERED=1

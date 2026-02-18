@@ -1,141 +1,154 @@
 # Event-Driven Asynchronous ML Model Retraining Service
 
-## Overview
-This project implements a robust, event-driven backend system for asynchronously triggering machine learning model retraining. It leverages **Flask** for the API gateway, **RabbitMQ** for message queuing, and **Docker** for containerization. The system is designed to handle high-throughput retraining requests without blocking the main application flow, ensuring scalability and resilience.
+## Project Overview
+This repository contains a production-grade, event-driven backend system designed to asynchronously trigger machine learning model retraining. The architecture leverages a microservices pattern to decouple the API gateway from the resource-intensive worker service, ensuring high availability and scalability.
 
-## Architecture
-The system follows a microservices architecture with three main components:
+## Architecture Guidelines
+The system consists of three primary components orchestrated via Docker Compose:
 
-1.  **Training Trigger API (`training_trigger_api`)**:
-    -   **Role**: Producer.
-    -   **Tech**: Python, Flask, Pika.
-    -   **Responsibility**: Accepts RESTful POST requests, validates the payload, and publishes persistent messages to the `retraining_queue`.
-    -   **Resilience**: Implements connection retry logic and health checks.
+1.  **API Gateway (`training_trigger_api`)**: A Flask-based REST API that accepts retraining requests, validates payloads, and publishes events to the message broker.
+2.  **Message Broker (`RabbitMQ`)**: A robust message queue that buffers events, ensuring reliable communication between the API and the Worker.
+3.  **Worker Service (`retraining_worker`)**: A background consumer that processes retraining events, simulates model training using Scikit-Learn, and manages data persistence.
 
-2.  **Message Queue (`rabbitmq`)**:
-    -   **Role**: Broker.
-    -   **Tech**: RabbitMQ (3-management-alpine).
-    -   **Responsibility**: Decouples the API from the Worker, ensuring message durability and reliable delivery.
+### System Diagram
+```mermaid
+graph LR
+    Client[Client] -- HTTP POST /trigger-retraining --> API[API Gateway]
+    API -- AMQP Publish --> RabbitMQ[RabbitMQ Queue]
+    RabbitMQ -- AMQP Consume --> Worker[Retraining Worker]
+    Worker -- Load Data --> Data[(Dataset)]
+    Worker -- Log Result --> Logs[Structured Logs]
+```
 
-3.  **Retraining Worker (`retraining_worker`)**:
-    -   **Role**: Consumer.
-    -   **Tech**: Python, Scikit-Learn, Pandas, Pika.
-    -   **Responsibility**: Consumes messages, simulates a resource-intensive ML training process using a dummy dataset, and logs the results.
-    -   **Resilience**: Uses manual message acknowledgment (`ack`) to ensure no data loss on failure. Handles failures with dead-lettering logic (simulated via strict NACK).
+### Sequence Diagram
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as API Gateway
+    participant MQ as RabbitMQ
+    participant Worker as Retraining Worker
+
+    Client->>API: POST /trigger-retraining (model_id, version)
+    API->>API: Validate Payload
+    API->>MQ: Publish Event (Persistent)
+    MQ-->>API: Ack
+    API-->>Client: 202 Accepted
+    
+    loop Async Processing
+        Worker->>MQ: Consume Message
+        Worker->>Worker: Train Model (Simulation)
+        Worker->>MQ: Acknowledge Message
+    end
+```
 
 ## Directory Structure
+The repository follows a strict separation of concerns:
+
 ```
 .
-├── docker-compose.yml          # Orchestration for all services
-├── .env                        # Environment variables
-├── training_trigger_api/       # API Service Code
-│   ├── app/                    # Flask Application
-│   ├── tests/                  # API Unit Tests
-│   └── Dockerfile
-├── retraining_worker/          # Worker Service Code
-│   ├── worker/                 # Consumer & ML Logic
-│   ├── tests/                  # Worker Unit Tests
-│   └── Dockerfile
-└── data/                       # Shared Data Directory
-    └── dummy_dataset.csv       # Synthetic Dataset
+├── docker-compose.yml          # Service orchestration configuration
+├── .env.example                # Environment variable template
+├── training_trigger_api/       # API Service Source Code
+│   ├── app/                    # Application Logic
+│   ├── tests/                  # Unit Tests
+│   └── Dockerfile              # Container Definition
+├── retraining_worker/          # Worker Service Source Code
+│   ├── worker/                 # Consumer & Training Logic
+│   ├── tests/                  # Unit Tests
+│   └── Dockerfile              # Container Definition
+└── data/                       # Shared Data Resources
+    └── dummy_dataset.csv       # Synthetic Training Data
 ```
 
-## Setup & Installation
+## Prerequisites
+-   Docker Engine (v20.10+)
+-   Docker Compose (v2.0+)
+-   Git
 
-### Prerequisites
--   **Docker** and **Docker Compose** installed.
--   **Git** (optional, for cloning).
+## Installation & Setup
 
-### running the Application
-1.  **Clone the repository** (if applicable):
+1.  **Clone the Repository**
     ```bash
-    git clone <repo_url>
-    cd event-driven-ml-retraining
+    git clone https://github.com/Rushikesh-5706/event-driven-ml-retraining-service.git
+    cd event-driven-ml-retraining-service
     ```
 
-2.  **Start the services**:
+2.  **Configuration**
+    Copy the example environment file:
+    ```bash
+    cp .env.example .env
+    ```
+
+3.  **Build and Start Services**
+    Use Docker Compose to build images and start containers:
     ```bash
     docker-compose up -d --build
     ```
-    This command builds the images and starts the containers in detached mode.
 
-3.  **Verify Status**:
+4.  **Verify Deployment**
+    Ensure all services are in the `healthy` or `running` state:
     ```bash
     docker-compose ps
     ```
-    Ensure all three services (`rabbitmq`, `training_trigger_api`, `retraining_worker`) are `healthy` or `running`.
 
-## Usage
+## Usage Guide
 
-### Trigger Retraining
-To trigger a model retraining job, send a POST request to the API:
+### Triggering a Retraining Job
+To initiate a retraining process, send a POST request to the API endpoint.
 
+**Request:**
 ```bash
 curl -X POST http://localhost:5000/trigger-retraining \
      -H "Content-Type: application/json" \
-     -d '{"model_id": "model_v1", "dataset_version": "v1.0"}'
+     -d '{"model_id": "production_model_v1", "dataset_version": "2023-10-27"}'
 ```
 
-**Expected Response (202 Accepted):**
+**Response (Success):**
 ```json
 {
   "message": "Retraining triggered successfully",
-  "model_id": "model_v1",
+  "model_id": "production_model_v1",
   "status": "success"
 }
 ```
 
-### Monitor Progress
-Check the worker logs to see the training simulation:
+### Monitoring
+Monitor the worker logs to observe the training progress:
 ```bash
 docker-compose logs -f retraining_worker
 ```
-**Sample Output:**
-```
-INFO - Received task: Retrain model_v1 (Data: v1.0)
-INFO - Starting training for model model_v1...
-INFO - Training completed. Model: model_v1, Accuracy: 0.8500
+
+**Expected Output:**
+```text
+INFO - Received task: Retrain production_model_v1 (Data: 2023-10-27)
+INFO - Starting training for model production_model_v1...
+INFO - Training completed. Model: production_model_v1, Accuracy: 0.84
 INFO - Task successfully processed. Acknowledging message.
 ```
 
 ## Testing
 
-### Automated E2E Verification
-A script `verify_system.py` is included to verify the entire flow automatically:
-```bash
-# Requires python requests
-python verify_system.py
-```
+### Unit Tests
+The project includes comprehensive unit tests for both services. To run them:
 
-### Running Unit Tests
-Unit tests are located in the `tests/` directory of each service. You can run them locally:
-
-1.  **Install Dependencies**:
+1.  **Install Test Dependencies** (Local Environment)
     ```bash
     pip install -r training_trigger_api/requirements.txt
     pip install -r retraining_worker/requirements.txt
     ```
 
-2.  **Run API Tests**:
+2.  **Execute Tests**
     ```bash
+    # API Tests
     export PYTHONPATH=$PYTHONPATH:$(pwd)/training_trigger_api
     python -m unittest discover training_trigger_api/tests
-    ```
 
-3.  **Run Worker Tests**:
-    ```bash
+    # Worker Tests
     export PYTHONPATH=$PYTHONPATH:$(pwd)/retraining_worker
     python -m unittest discover retraining_worker/tests
     ```
 
 ## Design Decisions
--   **Event-Driven**: Decoupling the training request from execution allows the API to remain responsive (~ms latency) even if training takes hours.
--   **Durability**: RabbitMQ queues are declared `durable=True` and messages are `persistent`. If the broker restarts, messages are safe.
--   **Reliability**: The worker uses manual acknowledgments. If the worker crashes mid-process, the message remains in the queue and will be redelivered to another worker.
--   **Configuration**: All credentials and hostnames are managed via `.env` file and Docker environment variables, preventing hardcoded secrets.
--   **Structure**: `training_trigger_api` and `retraining_worker` are isolated contexts, promoting separation of concerns.
-
-## Future Improvements
--   **Dead Letter Queue (DLQ)**: Implement a DLQ for messages that fail processing after N retries (currently we Nack without requeue to prevent loops).
--   **Metrics**: robust metrics (Prometheus) to track queue depth and training time.
--   **Shared Storage**: Use S3 or a shared volume for the dataset in a real production environment instead of a local file copy.
+-   **Asynchronous Processing**: Decoupling the API from the worker prevents HTTP timeouts during long-running training tasks.
+-   **Resilience**: The system implements connection retry mechanisms for RabbitMQ and uses persistent queues to prevent data loss during broker restarts.
+-   **Fail-Safe Data Loading**: The worker service includes fallback logic to generate synthetic data if the external dataset is unavailable, ensuring robustness in varied deployment environments.
